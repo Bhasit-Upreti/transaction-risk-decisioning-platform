@@ -160,10 +160,18 @@ if selected_tx_id:
         if rule_evals:
             eval_rows = []
             for r in rule_evals:
+                status_label = r.get("status", "evaluated")
+                if status_label == "not_evaluable":
+                    display_status = "⚠️ Baseline Unavailable"
+                elif r["triggered"]:
+                    display_status = "🚨 TRIGGERED"
+                else:
+                    display_status = "✅ Passed"
+
                 eval_rows.append({
                     "Rule ID": r["rule_id"],
                     "Rule Name": r["rule_name"],
-                    "Status": "🚨 TRIGGERED" if r["triggered"] else "✅ Passed",
+                    "Status": display_status,
                     "Points Awarded": r["points"],
                     "Condition / Threshold": r["threshold_info"],
                     "Reason Detail": r["reason"],

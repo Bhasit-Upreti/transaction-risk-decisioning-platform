@@ -1,7 +1,7 @@
 """
 Transaction Processing Pipeline.
 Orchestrates the complete workflow:
-Transaction input -> Data validation -> Business rules -> Risk score -> Decision -> Storage.
+Transaction input -> Data validation -> Business rules -> Risk score -> Decision -> Atomic Storage.
 """
 
 from typing import Dict, Any, Tuple
@@ -27,6 +27,7 @@ class TransactionPipeline:
     def process_transactions(self, raw_df: pd.DataFrame) -> Dict[str, Any]:
         """
         Processes a DataFrame of raw transactions through the entire decisioning lifecycle.
+        Valid transactions, decisions, and rule evaluations are persisted atomically.
 
         Returns:
             Dict containing processing metrics, valid_df, invalid_df, and decisions_df.
@@ -48,7 +49,7 @@ class TransactionPipeline:
             raw_df, existing_tx_ids=existing_ids
         )
 
-        # 3. Persist Validation Rejections
+        # 3. Persist Validation Rejections (data-quality logs preserved)
         if not invalid_df.empty:
             self.db.save_validation_results(invalid_df, valid_count=len(valid_df))
 
@@ -65,30 +66,37 @@ class TransactionPipeline:
                 "summary": val_summary,
             }
 
-        # 5. Persist Valid Transactions
-        self.db.save_valid_transactions(valid_df)
-
-        # 6. Fetch historical context for velocity rule (prior transactions from DB)
+        # 5. Fetch historical context for velocity calculation BEFORE saving the new batch
+        # This guarantees the batch is evaluated against true prior history
         historical_context = self.db.get_full_transactions()
 
-        # 7. Evaluate Business Rules
+        # 6. Evaluate Business Rules deterministically
         batch_outcomes = self.rule_engine.evaluate_batch(
             valid_df, historical_context=historical_context
         )
 
-        # 8. Calculate Risk Scores
+        # 7. Calculate Risk Scores
         scores_data = [self.scoring_calc.calculate_score(outcomes) for outcomes in batch_outcomes]
 
-        # 9. Generate Decisions
+        # 8. Generate Decisions
         decisions_df = self.decision_engine.process_batch(valid_df, batch_outcomes, scores_data)
 
-        # 10. Persist Decisions and Granular Rule Evaluations
-        self.db.save_decisions(decisions_df)
-
-        for idx, row in valid_df.iterrows():
-            tx_id = str(row["transaction_id"])
-            outcomes = batch_outcomes[idx]
-            self.db.save_rule_evaluations(tx_id, outcomes)
+        # 9. Atomically Persist Valid Transactions, Decisions, and Granular Rule Evaluations
+        try:
+            self.db.save_processed_batch(valid_df, decisions_df, batch_outcomes)
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Persistence failed: {str(e)}. Batch rolled back atomically.",
+                "total_records": len(raw_df),
+                "valid_count": 0,
+                "invalid_count": len(invalid_df),
+                "valid_df": pd.DataFrame(),
+                "invalid_df": invalid_df,
+                "decisions_df": pd.DataFrame(),
+                "summary": val_summary,
+                "error": str(e),
+            }
 
         decision_counts = decisions_df["decision"].value_counts().to_dict()
 

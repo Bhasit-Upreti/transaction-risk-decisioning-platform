@@ -89,13 +89,13 @@ with tab3:
     schema_rules = [
         {"Field": "transaction_id", "Type": "String", "Constraint": "Required, Non-empty, Unique in batch & database"},
         {"Field": "customer_id", "Type": "String", "Constraint": "Required, Non-empty synthetic customer reference"},
-        {"Field": "amount", "Type": "Numeric (Float)", "Constraint": "Required, Greater than zero (> 0.00)"},
-        {"Field": "currency", "Type": "String (ISO)", f"Constraint": f"Must be in: {', '.join(ALLOWED_CURRENCIES)}"},
+        {"Field": "amount", "Type": "Numeric (Float)", "Constraint": "Required, Greater than zero (> 0.00, INR-denominated)"},
+        {"Field": "currency", "Type": "String (ISO)", f"Constraint": f"Platform is INR-denominated (only {', '.join(ALLOWED_CURRENCIES)} accepted)"},
         {"Field": "timestamp", "Type": "ISO Datetime", "Constraint": "Required, Must be parseable datetime string"},
         {"Field": "country", "Type": "ISO Code", f"Constraint": f"Must be in: {', '.join(ALLOWED_COUNTRIES)}"},
         {"Field": "payment_method", "Type": "String", f"Constraint": f"Must be in: {', '.join(ALLOWED_PAYMENT_METHODS)}"},
         {"Field": "merchant_category", "Type": "String", f"Constraint": f"Must be in: {', '.join(ALLOWED_MERCHANT_CATEGORIES)}"},
-        {"Field": "customer_avg_amount", "Type": "Numeric (Float)", "Constraint": "Optional, Non-negative (>= 0)"},
+        {"Field": "customer_avg_amount", "Type": "Numeric (Float)", "Constraint": "Optional, Non-negative (>= 0). If omitted, customer spike rule is not evaluable."},
         {"Field": "customer_home_country", "Type": "ISO Code", "Constraint": "Optional, Customer default home country"},
     ]
     st.table(pd.DataFrame(schema_rules))

@@ -202,11 +202,14 @@ def generate_synthetic_transactions(
     include_invalid: bool = True,
     invalid_ratio: float = 0.10,
     seed: Optional[int] = 42,
+    start_id: int = 10001,
 ) -> pd.DataFrame:
-    """Convenience helper to generate synthetic transactions."""
+    """Generate synthetic transactions with a configurable ID range."""
     gen = SyntheticTransactionGenerator(seed=seed)
+
     return gen.generate_batch(
         n_records=n_records,
+        start_id=start_id,
         include_invalid=include_invalid,
         invalid_ratio=invalid_ratio,
         seed=seed,

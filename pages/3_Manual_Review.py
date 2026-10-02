@@ -21,7 +21,7 @@ col_tab, _ = st.columns([2, 4])
 with col_tab:
     status_filter = st.selectbox(
         "Queue Status Filter:",
-        ["Pending", "All", "Approved", "Declined", "Escalated"],
+        ["Pending", "All", "In Progress", "Approved", "Declined", "Escalated"],
         index=0,
     )
 
@@ -30,18 +30,21 @@ queue_df = db.get_review_queue(status_filter=status_filter)
 # Metric Summary Cards
 all_queue = db.get_review_queue(status_filter="All")
 pending_count = int((all_queue["review_status"] == "Pending").sum()) if not all_queue.empty else 0
+in_progress_count = int((all_queue["review_status"] == "In Progress").sum()) if not all_queue.empty else 0
 approved_count = int((all_queue["review_status"] == "Approved").sum()) if not all_queue.empty else 0
 declined_count = int((all_queue["review_status"] == "Declined").sum()) if not all_queue.empty else 0
 escalated_count = int((all_queue["review_status"] == "Escalated").sum()) if not all_queue.empty else 0
 
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3, m4, m5 = st.columns(5)
 with m1:
-    st.metric("⏳ Pending Analyst Review", pending_count)
+    st.metric("⏳ Pending", pending_count)
 with m2:
-    st.metric("✅ Overridden / Approved", approved_count)
+    st.metric("🔄 In Progress", in_progress_count)
 with m3:
-    st.metric("🚫 Confirmed Declined", declined_count)
+    st.metric("✅ Overridden / Approved", approved_count)
 with m4:
+    st.metric("🚫 Confirmed Declined", declined_count)
+with m5:
     st.metric("🚩 Escalated Cases", escalated_count)
 
 st.markdown("---")
@@ -134,6 +137,7 @@ if selected_tx:
                     [
                         "Approved (False Positive / Customer Verified)",
                         "Declined (Confirmed Suspicious / Fraud Risk)",
+                        "In Progress (Under Active Investigation)",
                         "Escalated (Requires Compliance / Law Enforcement Audit)",
                     ]
                 )
@@ -151,6 +155,8 @@ if selected_tx:
                     final_status = "Approved"
                 elif "Declined" in outcome_selection:
                     final_status = "Declined"
+                elif "In Progress" in outcome_selection:
+                    final_status = "In Progress"
                 else:
                     final_status = "Escalated"
 

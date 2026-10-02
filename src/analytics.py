@@ -46,7 +46,9 @@ def compute_summary_metrics(
         max_score = int(transactions_df["risk_score"].max()) if "risk_score" in transactions_df.columns else 0
 
         pending_reviews = 0
-        if "review_status" in transactions_df.columns:
+        if "review_status" in transactions_df.columns and "decision" in transactions_df.columns:
+            pending_reviews = int(((transactions_df["decision"] == "Review") & (transactions_df["review_status"] == "Pending")).sum())
+        elif "review_status" in transactions_df.columns:
             pending_reviews = int((transactions_df["review_status"] == "Pending").sum())
     else:
         approve_count = review_count = decline_count = 0

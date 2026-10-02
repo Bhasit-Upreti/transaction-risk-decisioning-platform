@@ -135,7 +135,7 @@ class TransactionValidator:
             if not curr_str:
                 errors.append("Missing currency")
             elif curr_str not in self.allowed_currencies:
-                errors.append(f"Unrecognized currency '{curr_str}'")
+                errors.append(f"Unrecognized or unsupported currency '{curr_str}'. Platform risk thresholds are INR-denominated.")
 
             # Check country
             country_val = row_dict.get("country")
@@ -183,7 +183,7 @@ class TransactionValidator:
                     "merchant_category": mc_str,
                     "country": country_str,
                     "payment_method": pm_str,
-                    "customer_avg_amount": round(parsed_cust_avg, 2) if parsed_cust_avg is not None else round(parsed_amount, 2),
+                    "customer_avg_amount": round(parsed_cust_avg, 2) if parsed_cust_avg is not None else None,
                     "customer_home_country": str(row_dict.get("customer_home_country", country_str)).strip().upper(),
                     "source": str(row_dict.get("source", "unknown")),
                 }

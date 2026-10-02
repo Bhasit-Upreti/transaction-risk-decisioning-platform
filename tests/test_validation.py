@@ -119,5 +119,29 @@ def test_unrecognized_currency_and_country(sample_valid_row):
     assert len(valid_df) == 0
     assert len(invalid_df) == 1
     errs = invalid_df.iloc[0]["error_reasons"]
-    assert "Unrecognized currency" in errs
+    assert "Unrecognized or unsupported currency" in errs
     assert "Unrecognized country" in errs
+
+
+def test_non_inr_currencies_rejected_in_inr_only_mode(sample_valid_row):
+    for non_inr in ["USD", "EUR", "GBP", "CAD", "AUD", "SGD"]:
+        row = sample_valid_row.copy()
+        row["transaction_id"] = f"TXN-{non_inr}"
+        row["currency"] = non_inr
+        df = pd.DataFrame([row])
+        valid_df, invalid_df, _ = validate_transactions(df)
+
+        assert len(valid_df) == 0, f"Expected {non_inr} to be rejected in INR-only mode"
+        assert len(invalid_df) == 1
+        assert "INR-denominated" in invalid_df.iloc[0]["error_reasons"]
+
+
+def test_missing_customer_average_preserves_none(sample_valid_row):
+    row = sample_valid_row.copy()
+    row["customer_avg_amount"] = None
+    df = pd.DataFrame([row])
+    valid_df, invalid_df, _ = validate_transactions(df)
+
+    assert len(valid_df) == 1
+    assert len(invalid_df) == 0
+    assert valid_df.iloc[0]["customer_avg_amount"] is None or pd.isna(valid_df.iloc[0]["customer_avg_amount"])

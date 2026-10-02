@@ -94,55 +94,66 @@ with st.sidebar:
 
     if ingest_mode == "Synthetic Generator":
         st.markdown("##### Generator Parameters")
-        n_tx = st.slider("Transaction Count", min_value=10, max_value=200, value=50, step=10)
-        inject_defects = st.checkbox("Inject Data Quality Defects", value=True, help="Injects malformed records to demonstrate validation filtering.")
-        defect_rate = st.slider("Defect Ratio (%)", min_value=5, max_value=40, value=15, step=5) / 100.0 if inject_defects else 0.0
+        n_tx = st.slider(
+            "Transaction Count",
+            min_value=10,
+            max_value=200,
+            value=50,
+            step=10
+        )
+        inject_defects = st.checkbox(
+            "Inject Data Quality Defects",
+            value=True,
+            help="Injects malformed records to demonstrate validation filtering."
+        )
+        defect_rate = (
+            st.slider("Defect Ratio (%)", min_value=5, max_value=40, value=15, step=5) / 100.0
+            if inject_defects else 0.0
+        )
 
-        if st.button("🚀 Ingest & Process Batch", use_container_width=True, type="primary"):
+        if st.button(
+            "🚀 Ingest & Process Batch",
+            use_container_width=True,
+            type="primary"
+        ):
             with st.spinner("Generating and processing transactions..."):
-                raw_df = generate_synthetic_transactions(
-                    n_records=n_tx,
-                    include_invalid=inject_defects,
-                    invalid_ratio=defect_rate,
-                    seed=int(datetime.now().timestamp()) % 10000,
-                )
-                result = pipeline.process_transactions(raw_df)
-                if result["success"]:
-                    st.success(result["message"])
-                    st.rerun()
-                else:
-                    st.error(result["message"])
+                try:
+                    # Generate a batch-specific ID to avoid duplicate transaction IDs.
+                    batch_id = int(datetime.now().timestamp() * 1000)
 
-    elif ingest_mode == "Upload CSV":
-        uploaded_file = st.file_uploader("Upload CSV transaction file", type=["csv"])
-        if uploaded_file is not None:
-            if st.button("⚡ Process Uploaded CSV", use_container_width=True, type="primary"):
-                with st.spinner("Ingesting and evaluating uploaded CSV..."):
-                    raw_df, err = ingest_csv(uploaded_file, source_label="csv_upload")
-                    if err:
-                        st.error(err)
-                    else:
-                        result = pipeline.process_transactions(raw_df)
-                        st.success(result["message"])
+                    raw_df = generate_synthetic_transactions(
+                        n_records=n_tx,
+                        include_invalid=inject_defects,
+                        invalid_ratio=defect_rate,
+                        seed=batch_id % 10000,
+                        start_id=batch_id,
+                    )
+
+                    st.write(f"Generated records: {len(raw_df)}")
+
+                    result = pipeline.process_transactions(raw_df)
+
+                    st.write(
+                        f"Valid: {result.get('valid_count', 'N/A')} | "
+                        f"Rejected: {result.get('invalid_count', 'N/A')}"
+                    )
+
+                    if result.get("success"):
+                        if result.get("valid_count", 0) > 0:
+                            st.success(result.get("message", "Batch processed."))
+                        else:
+                            st.warning(
+                                f"No valid transactions were added. "
+                                f"{result.get('invalid_count', 0)} records were rejected. "
+                                "Check the Data Quality page for rejection reasons."
+                            )
                         st.rerun()
+                    else:
+                        st.error(result.get("message", "Batch processing failed."))
 
-    elif ingest_mode == "Load Demo Sample":
-        st.info("Pre-packaged demonstration datasets:")
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            if st.button("📂 Load 40 Clean Txns", use_container_width=True):
-                raw_df, _ = ingest_csv("data/sample_transactions.csv", source_label="demo_clean")
-                if raw_df is not None:
-                    res = pipeline.process_transactions(raw_df)
-                    st.success(res["message"])
-                    st.rerun()
-        with col_s2:
-            if st.button("⚠️ Load 30 Mixed Txns", use_container_width=True):
-                raw_df, _ = ingest_csv("data/sample_invalid_transactions.csv", source_label="demo_mixed")
-                if raw_df is not None:
-                    res = pipeline.process_transactions(raw_df)
-                    st.success(res["message"])
-                    st.rerun()
+                except Exception as e:
+                    st.error("Synthetic transaction ingestion failed.")
+                    st.exception(e)
 
     st.markdown("---")
     st.subheader("⚙️ Database Management")

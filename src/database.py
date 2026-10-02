@@ -7,6 +7,7 @@ granular rule outcomes, and manual analyst reviews.
 from typing import List, Dict, Any, Optional, Set
 from pathlib import Path
 from datetime import datetime
+from contextlib import contextmanager
 import sqlite3
 import pandas as pd
 from config import DATABASE_PATH
@@ -22,10 +23,25 @@ class DatabaseManager:
         self.init_db()
 
     def get_connection(self) -> sqlite3.Connection:
-        """Returns a SQLite connection with dict-like row access."""
+        """Returns a SQLite connection with dict-like row access and foreign key enforcement."""
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON;")
         return conn
+
+    @contextmanager
+    def transaction(self):
+        """Context manager for atomic database transaction management."""
+        conn = self.get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def init_db(self) -> None:
         """Creates database tables and indexes if they do not exist."""
@@ -90,6 +106,7 @@ class DatabaseManager:
                 points INTEGER NOT NULL,
                 reason TEXT,
                 threshold_info TEXT,
+                status TEXT DEFAULT 'evaluated',
                 evaluated_at TEXT NOT NULL,
                 FOREIGN KEY (transaction_id) REFERENCES transactions (transaction_id)
             );
@@ -115,6 +132,15 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_val_valid ON validation_results(is_valid);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_rev_status ON reviews(review_status);")
 
+            # Schema migrations — safely add columns that may be absent in older DB files
+            try:
+                cursor.execute(
+                    "ALTER TABLE rule_evaluations ADD COLUMN status TEXT DEFAULT 'evaluated';"
+                )
+            except sqlite3.OperationalError:
+                # Column already exists — nothing to do
+                pass
+
             conn.commit()
 
     def get_existing_transaction_ids(self) -> Set[str]:
@@ -125,19 +151,26 @@ class DatabaseManager:
             rows = cursor.fetchall()
             return {row["transaction_id"] for row in rows if row["transaction_id"]}
 
-    def save_valid_transactions(self, valid_df: pd.DataFrame) -> int:
-        """Saves valid transactions into the database."""
+    def save_valid_transactions(self, valid_df: pd.DataFrame, conn: Optional[sqlite3.Connection] = None) -> int:
+        """
+        Saves valid transactions into the database using INSERT (immutable transactions).
+        Raises sqlite3.IntegrityError on duplicate IDs to prevent silent overwriting.
+        """
         if valid_df.empty:
             return 0
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         inserted = 0
 
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
+        def _do_insert(c):
+            nonlocal inserted
+            cursor = c.cursor()
             for _, row in valid_df.iterrows():
+                cust_avg = row.get("customer_avg_amount")
+                cust_avg_val = float(cust_avg) if cust_avg is not None and not pd.isna(cust_avg) else None
+
                 cursor.execute("""
-                INSERT OR REPLACE INTO transactions (
+                INSERT INTO transactions (
                     transaction_id, customer_id, amount, currency, timestamp,
                     merchant_category, country, payment_method, customer_avg_amount,
                     customer_home_country, source, created_at
@@ -151,13 +184,19 @@ class DatabaseManager:
                     str(row["merchant_category"]),
                     str(row["country"]),
                     str(row["payment_method"]),
-                    float(row.get("customer_avg_amount", row["amount"])),
+                    cust_avg_val,
                     str(row.get("customer_home_country", row["country"])),
                     str(row.get("source", "unknown")),
                     now_str,
                 ))
                 inserted += 1
-            conn.commit()
+
+        if conn is not None:
+            _do_insert(conn)
+        else:
+            with self.transaction() as c:
+                _do_insert(c)
+
         return inserted
 
     def save_validation_results(self, invalid_df: pd.DataFrame, valid_count: int = 0) -> int:
@@ -185,14 +224,16 @@ class DatabaseManager:
             conn.commit()
         return inserted
 
-    def save_decisions(self, decisions_df: pd.DataFrame) -> int:
+    def save_decisions(self, decisions_df: pd.DataFrame, conn: Optional[sqlite3.Connection] = None) -> int:
         """Saves decision records and auto-creates pending review entries for Review decisions."""
         if decisions_df.empty:
             return 0
 
         inserted = 0
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
+
+        def _do_save(c):
+            nonlocal inserted
+            cursor = c.cursor()
             for _, row in decisions_df.iterrows():
                 tx_id = str(row["transaction_id"])
                 dec_val = str(row["decision"])
@@ -213,7 +254,7 @@ class DatabaseManager:
                 ))
 
                 # Initialize review record if it does not exist
-                initial_status = "Pending" if dec_val in ("Review", "Decline") else "Auto-Approved"
+                initial_status = "Pending" if dec_val == "Review" else ("Auto-Declined" if dec_val == "Decline" else "Auto-Approved")
                 cursor.execute("""
                 INSERT OR IGNORE INTO reviews (
                     transaction_id, review_status, reviewer_outcome, review_note, reviewer_name, reviewed_at
@@ -221,21 +262,27 @@ class DatabaseManager:
                 """, (tx_id, initial_status))
 
                 inserted += 1
-            conn.commit()
+
+        if conn is not None:
+            _do_save(conn)
+        else:
+            with self.transaction() as c:
+                _do_save(c)
+
         return inserted
 
-    def save_rule_evaluations(self, tx_id: str, rule_outcomes: List[Any]) -> None:
+    def save_rule_evaluations(self, tx_id: str, rule_outcomes: List[Any], conn: Optional[sqlite3.Connection] = None) -> None:
         """Saves granular rule outcome details for audit inspection."""
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            # Clear previous evaluations for this tx_id if re-evaluated
+
+        def _do_save(c):
+            cursor = c.cursor()
             cursor.execute("DELETE FROM rule_evaluations WHERE transaction_id = ?", (tx_id,))
             for outcome in rule_outcomes:
                 cursor.execute("""
                 INSERT INTO rule_evaluations (
-                    transaction_id, rule_id, rule_name, triggered, points, reason, threshold_info, evaluated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    transaction_id, rule_id, rule_name, triggered, points, reason, threshold_info, status, evaluated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     tx_id,
                     outcome.rule_id,
@@ -244,9 +291,36 @@ class DatabaseManager:
                     outcome.points,
                     outcome.reason,
                     outcome.threshold_info,
+                    getattr(outcome, "status", "evaluated"),
                     now_str,
                 ))
-            conn.commit()
+
+        if conn is not None:
+            _do_save(conn)
+        else:
+            with self.transaction() as c:
+                _do_save(c)
+
+    def save_processed_batch(
+        self,
+        valid_df: pd.DataFrame,
+        decisions_df: pd.DataFrame,
+        batch_outcomes: List[List[Any]],
+    ) -> None:
+        """
+        Atomically saves valid transactions, decisions, and granular rule evaluations
+        in a single database transaction. If any write fails, all are rolled back.
+        """
+        if valid_df.empty:
+            return
+
+        with self.transaction() as conn:
+            self.save_valid_transactions(valid_df, conn=conn)
+            self.save_decisions(decisions_df, conn=conn)
+            for idx, row in valid_df.reset_index(drop=True).iterrows():
+                tx_id = str(row["transaction_id"])
+                outcomes = batch_outcomes[idx]
+                self.save_rule_evaluations(tx_id, outcomes, conn=conn)
 
     def record_review(
         self,
@@ -342,7 +416,7 @@ class DatabaseManager:
 
             # Also fetch granular rule evaluations
             cursor.execute("""
-            SELECT rule_id, rule_name, triggered, points, reason, threshold_info, evaluated_at
+            SELECT rule_id, rule_name, triggered, points, reason, threshold_info, status, evaluated_at
             FROM rule_evaluations
             WHERE transaction_id = ?
             ORDER BY rule_id ASC
@@ -386,9 +460,9 @@ class DatabaseManager:
         FROM transactions t
         JOIN decisions d ON t.transaction_id = d.transaction_id
         LEFT JOIN reviews r ON t.transaction_id = r.transaction_id
-        WHERE 1=1
+        WHERE d.decision = ?
         """
-        params = []
+        params = ["Review"]
         if status_filter and status_filter != "All":
             base_query += " AND COALESCE(r.review_status, 'Pending') = ?"
             params.append(status_filter)

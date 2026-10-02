@@ -25,7 +25,7 @@ REQUIRED_FIELDS: List[str] = [
 ]
 
 ALLOWED_CURRENCIES: List[str] = [
-    "INR", "USD", "EUR", "GBP", "CAD", "AUD", "SGD", "AED", "JPY"
+    "INR"
 ]
 
 ALLOWED_COUNTRIES: List[str] = [
@@ -56,22 +56,22 @@ RULES_CONFIG: Dict[str, Dict[str, Any]] = {
     "R001": {
         "rule_id": "R001",
         "name": "High-Value Amount",
-        "description": "Transaction amount exceeds the high-value threshold.",
+        "description": "Transaction amount exceeds the high-value threshold (INR-denominated).",
         "points": 30,
         "enabled": True,
         "parameters": {
-            "amount_threshold": 15000.0  # INR or base unit
+            "amount_threshold": 15000.0  # Denominated in INR
         }
     },
     "R002": {
         "rule_id": "R002",
         "name": "Unusual Spike vs Customer Average",
-        "description": "Amount is substantially higher than the customer historical average.",
+        "description": "Amount is substantially higher than customer historical average baseline (INR-denominated).",
         "points": 25,
         "enabled": True,
         "parameters": {
             "multiplier": 3.0,
-            "min_excess_amount": 2000.0  # Avoid triggering on small micro-amounts (e.g. avg 10 vs 35)
+            "min_excess_amount": 2000.0  # INR minimum excess
         }
     },
     "R003": {

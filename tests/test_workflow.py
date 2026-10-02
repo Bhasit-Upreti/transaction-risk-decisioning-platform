@@ -92,20 +92,20 @@ def test_rejection_isolation(temp_db):
 def test_manual_review_flow(temp_db):
     pipeline = TransactionPipeline(db=temp_db)
 
-    # High amount transaction that triggers Review or Decline
-    high_risk_record = {
+    # Transaction that maps to Review decision (score 30-69, triggers R001 = 30 pts)
+    review_risk_record = {
         "transaction_id": "TXN-REVIEW-ME",
-        "customer_id": "C-HIGH",
-        "amount": 45000.0,
+        "customer_id": "C-REVIEW",
+        "amount": 18000.0,
         "currency": "INR",
         "timestamp": "2026-10-02 12:00:00",
         "merchant_category": "Electronics",
-        "country": "SG",
+        "country": "IN",
         "payment_method": "Card",
-        "customer_avg_amount": 1500.0,
+        "customer_avg_amount": 18000.0,
         "customer_home_country": "IN",
     }
-    df = pd.DataFrame([high_risk_record])
+    df = pd.DataFrame([review_risk_record])
     pipeline.process_transactions(df)
 
     # Check that transaction is stored and queued
