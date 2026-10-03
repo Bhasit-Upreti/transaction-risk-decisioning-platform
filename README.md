@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/Framework-Streamlit-FF4B4B.svg)](https://streamlit.io/)
 [![Tests](https://img.shields.io/badge/Tests-22%20Passed-brightgreen.svg)]()
-[![License](https://img.shields.io/badge/License-MIT-green.svg)]()
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 > An educational fintech prototype simulating how real-world financial systems ingest transactions, enforce rigorous data quality checks, evaluate transparent business rules, compute explainable risk scores, persist audit trails, and manage human-in-the-loop review queues.
 
